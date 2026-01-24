@@ -1,0 +1,389 @@
+
+
+# Docker Compose for Local Development
+# Production deployment uses Kubernetes + Helm
+
+services:
+  # =========== Infrastructure ===========
+  
+  postgres:
+    image: postgres:15-alpine
+    container_name: safety-postgres
+    environment:
+      POSTGRES_USER: safety
+      POSTGRES_PASSWORD: dev_password_unsafe_only
+      POSTGRES_DB: safety_db
+      # REMOVE THIS LINE - it's causing the crash
+      # POSTGRES_INITDB_ARGS: "-c log_statement=all"
+    command: postgres -c log_statement=all  # ← Add logging here instead
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Comment out init script for now
+      # - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U safety"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - safety-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: safety-redis
+    command: redis-server --appendonly yes --requirepass redis_dev_password
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - safety-net
+
+  qdrant:
+    image: qdrant/qdrant:v1.7.0
+    container_name: safety-qdrant
+    environment:
+      QDRANT_API_KEY: qdrant_dev_key_unsafe_only
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - safety-net
+
+  # =========== Observability ===========
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: safety-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - safety-net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: safety-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: dev_password_unsafe_only
+      GF_INSTALL_PLUGINS: redis-datasource
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana-dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    depends_on:
+      - prometheus
+    networks:
+      - safety-net
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: safety-jaeger
+    environment:
+      COLLECTOR_ZIPKIN_HTTP_PORT: 9411
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "6831:6831/udp"  # Jaeger agent thrift
+      - "4317:4317"       # OTLP gRPC receiver
+      - "16686:16686"     # Jaeger UI
+    networks:
+      - safety-net
+
+  # =========== Safety System Services ===========
+
+  event-ingestion:
+    build:
+      context: .
+      dockerfile: ./services/event-ingestion/Dockerfile
+    container_name: safety-event-ingestion
+    environment:
+      SERVICE_NAME: event-ingestion
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_dev_password
+      DATABASE_URL: postgresql+asyncpg://safety:dev_password_unsafe_only@postgres:5432/safety_db
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    volumes:
+      - ./services/event-ingestion/src:/app/src:ro
+    networks:
+      - safety-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  risk-screening:
+    build:
+      context: .
+      dockerfile: ./services/risk-screening/Dockerfile
+    container_name: safety-risk-screening
+    environment:
+      SERVICE_NAME: risk-screening
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_dev_password
+      DATABASE_URL: postgresql+asyncpg://safety:dev_password_unsafe_only@postgres:5432/safety_db
+      SCREENING_THRESHOLD: "0.7"
+      SCREENING_MODEL: tinybert
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    ports:
+      - "8002:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    volumes:
+      - ./services/risk-screening/src:/app/src:ro
+      - ./models:/models:ro
+    networks:
+      - safety-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  embedding-context:
+    build:
+      context: .
+      dockerfile: ./services/embedding-context/Dockerfile
+    container_name: safety-embedding-context
+    environment:
+      SERVICE_NAME: embedding-context
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_dev_password
+      DATABASE_URL: postgresql+asyncpg://safety:dev_password_unsafe_only@postgres:5432/safety_db
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_API_KEY: qdrant_dev_key_unsafe_only
+      EMBEDDING_MODEL: text-embedding-3-small
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    ports:
+      - "8003:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    volumes:
+      - ./services/embedding-context/src:/app/src:ro
+    networks:
+      - safety-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  reasoning:
+    build:
+      context: .
+      dockerfile: ./services/reasoning/Dockerfile
+    container_name: safety-reasoning
+    environment:
+      SERVICE_NAME: reasoning
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_dev_password
+      DATABASE_URL: postgresql+asyncpg://safety:dev_password_unsafe_only@postgres:5432/safety_db
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_API_KEY: qdrant_dev_key_unsafe_only
+      LLM_PROVIDER: local
+      LOCAL_LLM_ENDPOINT: http://ollama:11434
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    ports:
+      - "8004:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    volumes:
+      - ./services/reasoning/src:/app/src:ro
+    networks:
+      - safety-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  action-executor:
+    build:
+      context: .
+      dockerfile: ./services/action-executor/Dockerfile
+    container_name: safety-action-executor
+    environment:
+      SERVICE_NAME: action-executor
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_dev_password
+      DATABASE_URL: postgresql+asyncpg://safety:dev_password_unsafe_only@postgres:5432/safety_db
+      ACTION_POLICY: graduated_escalation
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    ports:
+      - "8005:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    volumes:
+      - ./services/action-executor/src:/app/src:ro
+    networks:
+      - safety-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  session-manager:
+    build:
+      context: .
+      dockerfile: ./services/session-manager/Dockerfile
+    container_name: safety-session-manager
+    environment:
+      SERVICE_NAME: session-manager
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_dev_password
+      DATABASE_URL: postgresql+asyncpg://safety:dev_password_unsafe_only@postgres:5432/safety_db
+      SESSION_TTL_MINUTES: "30"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    ports:
+      - "8006:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    volumes:
+      - ./services/session-manager/src:/app/src:ro
+    networks:
+      - safety-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  reporting:
+    build:
+      context: .
+      dockerfile: ./services/reporting/Dockerfile
+    container_name: safety-reporting
+    environment:
+      SERVICE_NAME: reporting
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_dev_password
+      DATABASE_URL: postgresql+asyncpg://safety:dev_password_unsafe_only@postgres:5432/safety_db
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    ports:
+      - "8007:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    volumes:
+      - ./services/reporting/src:/app/src:ro
+    networks:
+      - safety-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # =========== Optional: Local LLM ===========
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: safety-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Uncomment to auto-pull model on startup
+    # entrypoint: /bin/sh -c "ollama serve & sleep 10 && ollama pull mistral"
+    networks:
+      - safety-net
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  prometheus_data:
+  grafana_data:
+  ollama_data:
+
+networks:
+  safety-net:
+    driver: bridge

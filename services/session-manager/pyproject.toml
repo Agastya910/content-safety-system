@@ -1,0 +1,14 @@
+﻿[tool.poetry]
+name = "event-ingestion"
+version = "1.0.0"
+description = "Event Ingestion Service"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.109.0"
+uvicorn = {extras = ["standard"], version = "^0.27.0"}
+pydantic = "^2.5.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

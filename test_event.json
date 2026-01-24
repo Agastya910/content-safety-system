@@ -1,0 +1,11 @@
+﻿{
+  "event_type": "message_created",
+  "platform": "discord",
+  "channel_id": "ch123",
+  "user_id": "user_target",
+  "author_id": "user_harasser",
+  "content": "You are terrible",
+  "metadata": {
+    "timestamp": "2026-01-22T07:00:00Z"
+  }
+}
