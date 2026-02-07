@@ -30,8 +30,8 @@ import hashlib
 
 from fastapi import FastAPI, HTTPException, Header, Body, status
 from fastapi.responses import JSONResponse
-import aioredis
-from aioredis import Redis
+import redis.asyncio as redis
+import redis.asyncio.client as Redis
 from pydantic import ValidationError
 import opentelemetry.trace as trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
@@ -39,7 +39,7 @@ from opentelemetry.instrumentation.redis import RedisInstrumentor
 import prometheus_client as prom
 
 # Shared library
-from safety_system.core.models import Event, EventType, Platform, EventMetadata
+from shared.safety_system.core.models import Event, EventType, Platform, EventMetadata
 
 
 logger = logging.getLogger(__name__)
@@ -47,31 +47,47 @@ tracer = trace.get_tracer(__name__)
 
 
 # ============ Metrics ============
+from prometheus_client import REGISTRY
 
-events_received = prom.Counter(
+def get_or_create_counter(name, documentation, labelnames=()):
+    if name in REGISTRY._names_to_collectors:
+        return REGISTRY._names_to_collectors[name]
+    return prom.Counter(name, documentation, labelnames)
+
+def get_or_create_gauge(name, documentation):
+    if name in REGISTRY._names_to_collectors:
+        return REGISTRY._names_to_collectors[name]
+    return prom.Gauge(name, documentation)
+
+def get_or_create_histogram(name, documentation, buckets=()):
+    if name in REGISTRY._names_to_collectors:
+        return REGISTRY._names_to_collectors[name]
+    return prom.Histogram(name, documentation, buckets=buckets)
+
+events_received = get_or_create_counter(
     'events_received_total',
     'Total events received',
     ['platform', 'event_type']
 )
 
-events_deduplicated = prom.Counter(
+events_deduplicated = get_or_create_counter(
     'events_deduplicated_total',
     'Total duplicate events',
     ['platform']
 )
 
-events_queued = prom.Gauge(
+events_queued = get_or_create_gauge(
     'events_queue_depth',
     'Current queue depth'
 )
 
-ingestion_latency = prom.Histogram(
+ingestion_latency = get_or_create_histogram(
     'ingestion_latency_ms',
     'Event ingestion latency',
     buckets=[10, 25, 50, 100, 250, 500, 1000]
 )
 
-validation_errors = prom.Counter(
+validation_errors = get_or_create_counter(
     'validation_errors_total',
     'Validation errors',
     ['error_type']
@@ -296,7 +312,7 @@ class IngestionEngine:
     6. Respond to client
     """
 
-    def __init__(self, redis: Redis):
+    def __init__(self, redis: redis.Redis):
         self.redis = redis
         self.validator = EventValidator()
         self.deduplicator = Deduplicator(redis)
@@ -396,7 +412,7 @@ class IngestionEngine:
 
 # ============ FastAPI App ============
 
-redis_client: Optional[Redis] = None
+redis_client: Optional[redis.Redis] = None
 ingestion_engine: Optional[IngestionEngine] = None
 
 
@@ -410,12 +426,13 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.service_name}")
 
     # Connect to Redis
-    redis_client = await aioredis.create_redis_pool(
-        f"redis://{settings.redis_host}:{settings.redis_port}",
+    redis_client = redis.Redis(
+        host=settings.redis_host,
+        port=settings.redis_port,
         password=settings.redis_password or None,
-        minsize=5,
-        maxsize=20
+        decode_responses=True
     )
+    await redis_client.ping()
 
     ingestion_engine = IngestionEngine(redis_client)
 
@@ -628,7 +645,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=settings.log_level)
 
     uvicorn.run(
-        app,
+        "src.event_ingestion.main:app",
         host="0.0.0.0",
         port=settings.port,
         workers=settings.workers,

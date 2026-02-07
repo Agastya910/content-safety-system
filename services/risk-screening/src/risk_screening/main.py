@@ -29,8 +29,8 @@ from collections import Counter
 
 from fastapi import FastAPI, HTTPException, Depends, Header, status
 from fastapi.responses import JSONResponse
-import aioredis
-from aioredis import Redis
+import redis.asyncio as redis
+from redis.asyncio import Redis
 import torch
 from sentence_transformers import SentenceTransformer
 import faiss
@@ -161,7 +161,7 @@ class BehavioralHeuristics:
 
     # Targeting patterns
     TARGETING_KEYWORDS = {
-        'you are', 'you\\'re', 'your', 'you all', 'y\'all'
+        "you are", "you're", "your", "you all", "y'all"
     }
 
     @staticmethod
@@ -550,9 +550,10 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.service_name}")
 
     # Initialize components
-    redis_client = await aioredis.create_redis_pool(
+    redis_client = redis.from_url(
         f"redis://{settings.redis_host}:{settings.redis_port}",
-        password=settings.redis_password or None
+        password=settings.redis_password or None,
+        decode_responses=False  # Important for streams to handle binary data if needed, or True if purely text
     )
 
     embedding_model = EmbeddingModel()

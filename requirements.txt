@@ -1,63 +1,65 @@
-# requirements.txt for Event Ingestion & Risk Screening Services
-
-# Core
+# --- Core API & Validation ---
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 pydantic==2.5.0
 python-multipart==0.0.6
 
-# Async
+# --- Async & Communication ---
+# Note: aioredis is now merged into redis-py 5.x.
+# We keep aioredis for legacy imports if needed, but 'redis' handles both.
 aioredis==2.0.1
 asyncio==3.4.3
 httpx==0.25.1
 
-# Database & Storage
+# --- Database & Storage ---
 redis==5.0.1
 sqlalchemy==2.0.23
-psycopg2-binary==2.9.9
+psycopg2-binary==2.9.11
 alembic==1.12.1
 
-# ML & Embeddings
+# --- ML & Embeddings ---
 sentence-transformers==2.2.2
-torch==2.1.1
-faiss-cpu==1.7.4
-# For GPU: faiss-gpu==1.7.4
+torch>=2.2.0  # Supports Python 3.12
+faiss-cpu>=1.8.0
 numpy==1.26.2
 scikit-learn==1.3.2
 
-# Vector Database
-qdrant-client==2.7.0
+# --- Vector Database ---
+# File 2 had 2.7.0, File 1 had 1.7.0.
+# 1.7.0 is the most stable widely used version for this stack.
+qdrant-client==1.7.0
 
-# Observability & Monitoring
+# --- Observability & Monitoring ---
 opentelemetry-api==1.21.0
 opentelemetry-sdk==1.21.0
 opentelemetry-instrumentation==0.42b0
 opentelemetry-instrumentation-fastapi==0.42b0
 opentelemetry-instrumentation-redis==0.42b0
-opentelemetry-exporter-jaeger==1.21.0
+# Modern replacement for the deprecated Jaeger exporter:
+opentelemetry-exporter-otlp==1.21.0
 opentelemetry-exporter-prometheus==0.42b0
 prometheus-client==0.19.0
 
-# Logging & Tracing
+# --- Logging & Tracing ---
 python-json-logger==2.0.7
 structlog==23.2.0
+# Only included if your legacy code specifically requires the old Jaeger SDK
 jaeger-client==4.8.0
 
-# Testing
+# --- Testing ---
 pytest==7.4.3
 pytest-asyncio==0.21.1
 pytest-cov==4.1.0
-httpx==0.25.1
 locust==2.17.0
 
-# Development
+# --- Development & Linting ---
 black==23.12.0
 flake8==6.1.0
 mypy==1.7.1
 isort==5.13.2
 pre-commit==3.5.0
 
-# Utilities
+# --- Utilities ---
 python-dotenv==1.0.0
 click==8.1.7
 typer==0.9.0

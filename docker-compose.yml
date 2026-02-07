@@ -1,11 +1,9 @@
-
-
 # Docker Compose for Local Development
 # Production deployment uses Kubernetes + Helm
 
 services:
   # =========== Infrastructure ===========
-  
+
   postgres:
     image: postgres:15-alpine
     container_name: safety-postgres
@@ -13,17 +11,15 @@ services:
       POSTGRES_USER: safety
       POSTGRES_PASSWORD: dev_password_unsafe_only
       POSTGRES_DB: safety_db
-      # REMOVE THIS LINE - it's causing the crash
-      # POSTGRES_INITDB_ARGS: "-c log_statement=all"
-    command: postgres -c log_statement=all  # ← Add logging here instead
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    command: postgres -c log_statement=all -c log_destination=stderr
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Comment out init script for now
       # - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U safety"]
+      test: [ "CMD-SHELL", "pg_isready -U safety" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -39,7 +35,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -57,7 +53,7 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      test: [ "CMD-SHELL", "bash -c '</dev/tcp/localhost/6333'" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -105,9 +101,9 @@ services:
       COLLECTOR_ZIPKIN_HTTP_PORT: 9411
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
-      - "6831:6831/udp"  # Jaeger agent thrift
-      - "4317:4317"       # OTLP gRPC receiver
-      - "16686:16686"     # Jaeger UI
+      - "6831:6831/udp" # Jaeger agent thrift
+      - "4317:4317" # OTLP gRPC receiver
+      - "16686:16686" # Jaeger UI
     networks:
       - safety-net
 
@@ -127,6 +123,7 @@ services:
       REDIS_PASSWORD: redis_dev_password
       DATABASE_URL: postgresql+asyncpg://safety:dev_password_unsafe_only@postgres:5432/safety_db
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      PORT: 8000
     ports:
       - "8001:8000"
     depends_on:
@@ -141,7 +138,7 @@ services:
     networks:
       - safety-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -162,6 +159,7 @@ services:
       SCREENING_THRESHOLD: "0.7"
       SCREENING_MODEL: tinybert
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      PORT: 8000
     ports:
       - "8002:8000"
     depends_on:
@@ -177,7 +175,7 @@ services:
     networks:
       - safety-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -216,7 +214,7 @@ services:
     networks:
       - safety-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -256,7 +254,7 @@ services:
     networks:
       - safety-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -290,7 +288,7 @@ services:
     networks:
       - safety-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -324,7 +322,7 @@ services:
     networks:
       - safety-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -357,7 +355,7 @@ services:
     networks:
       - safety-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -383,6 +381,7 @@ volumes:
   prometheus_data:
   grafana_data:
   ollama_data:
+
 
 networks:
   safety-net:

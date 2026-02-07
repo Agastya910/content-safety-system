@@ -1,0 +1,217 @@
+version: '3.9'
+
+services:
+  # ============ Data Layer ============
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: safety_db
+      POSTGRES_USER: safety_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U safety_user" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - safety-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - safety-network
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      # FIX 1: Hardcode the key so there is no ambiguity
+      QDRANT_API_KEY: qdrant-key
+    # healthcheck:
+    #   # FIX 2: Hardcode the key in the curl command to match exactly
+    #   test: ["CMD-SHELL", "curl -f -H 'api-key: qdrant-key' http://localhost:6333/collections || exit 1"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 5
+    networks:
+      - safety-network
+  # ============ Observability ============
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - safety-network
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: redis-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - safety-network
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "6831:6831/udp"
+      - "16686:16686"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    volumes:
+      - jaeger_data:/badger/data
+    networks:
+      - safety-network
+
+  # ============ Event Ingestion Service ============
+  event-ingestion:
+    build:
+      context: .
+      dockerfile: services/event-ingestion/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      # CRITICAL: Ensures Python finds 'shared' and your installed libraries
+      - ENVIRONMENT=development
+      - LOG_LEVEL=INFO
+      - PORT=8001
+      - WORKERS=2
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MAX_QUEUE_DEPTH=100000
+      - BATCH_SIZE=500
+      - DEDUP_WINDOW_SECONDS=3600
+      - API_KEYS="test-key,dev-key"
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - PROMETHEUS_MULTIPROC_DIR=/tmp
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8001/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      # FIX: Map 'src' and 'shared' separately so we don't overwrite the whole /app folder
+      - ./services/event-ingestion/src:/app/src
+      - ./shared:/app/shared
+      - /app/__pycache__
+    networks:
+      - safety-network
+    restart: unless-stopped
+
+  # ============ Risk Screening Service ============
+
+  risk-screening:
+    build:
+      context: .
+      dockerfile: services/risk-screening/Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - ENVIRONMENT=development
+      - LOG_LEVEL=INFO
+      - PORT=8002
+      - WORKERS=2
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - SCREENING_MODEL="sentence-transformers/e5-small-v2"
+      - SCREENING_THRESHOLD=0.7
+      - MODEL_BATCH_SIZE=32
+      - BATCH_SIZE=100
+      - BATCH_TIMEOUT_MS=500
+      - DEVICE=cuda
+      - USE_FP32=false
+      - API_KEYS="test-key,dev-key"
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8002/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      # FIX: Map 'src' and 'shared' separately here too
+      - ./services/risk-screening/src:/app/src
+      - ./shared:/app/shared
+      - /app/__pycache__
+      - huggingface_cache:/root/.cache/huggingface
+    networks:
+      - safety-network
+    restart: unless-stopped
+    # Note: For GPU support, uncomment:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    # ============ Load Testing ============
+
+  locust:
+    image: locustio/locust:latest
+    ports:
+      - "8089:8089"
+    volumes:
+      - ./testing/locustfile.py:/home/locust/locustfile.py
+    command: -f /home/locust/locustfile.py --web
+    environment:
+      TARGET_HOST: http://event-ingestion:8001
+    depends_on:
+      - event-ingestion
+    networks:
+      - safety-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  prometheus_data:
+  grafana_data:
+  jaeger_data:
+  huggingface_cache:
+
+
+networks:
+  safety-network:
+    driver: bridge
