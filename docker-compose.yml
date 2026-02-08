@@ -158,6 +158,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://safety:dev_password_unsafe_only@postgres:5432/safety_db
       SCREENING_THRESHOLD: "0.7"
       SCREENING_MODEL: tinybert
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_API_KEY: qdrant_dev_key_unsafe_only
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
       PORT: 8000
     ports:

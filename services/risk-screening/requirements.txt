@@ -15,8 +15,8 @@ psycopg2-binary==2.9.9
 alembic==1.12.1
 
 # ML & Embeddings
-sentence-transformers==2.2.2
-huggingface-hub<0.25.0
+sentence-transformers>=2.3.0
+huggingface-hub>=0.20.0
 torch>=2.2.0
 faiss-cpu==1.7.4
 numpy==1.26.2

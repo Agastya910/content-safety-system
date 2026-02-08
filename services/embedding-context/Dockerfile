@@ -1,9 +1,8 @@
 ﻿FROM python:3.11-slim as builder
 WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential libpq-dev && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir poetry==1.7.1
-COPY services/embedding-context/pyproject.toml services/embedding-context/poetry.lock* ./
-RUN poetry config virtualenvs.create false && poetry install --no-dev --no-interaction --no-ansi --no-root || pip install fastapi uvicorn pydantic redis asyncpg opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-fastapi
+COPY services/embedding-context/requirements.txt ./requirements.txt
+RUN pip install --default-timeout=1000 --no-cache-dir -r requirements.txt
 
 FROM python:3.11-slim
 WORKDIR /app

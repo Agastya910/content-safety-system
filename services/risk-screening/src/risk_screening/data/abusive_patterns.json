@@ -1,0 +1,252 @@
+[
+    {
+        "text": "You are worthless and should just die.",
+        "category": "HARASSMENT",
+        "severity": "HIGH"
+    },
+    {
+        "text": "I will find you and hurt you.",
+        "category": "THREAT",
+        "severity": "CRITICAL"
+    },
+    {
+        "text": "Kill yourself loser.",
+        "category": "HARASSMENT",
+        "severity": "HIGH"
+    },
+    {
+        "text": "Everyone hates you.",
+        "category": "HARASSMENT",
+        "severity": "MEDIUM"
+    },
+    {
+        "text": "You're so ugly and stupid.",
+        "category": "HARASSMENT",
+        "severity": "MEDIUM"
+    },
+    {
+        "text": "I hope you get cancer.",
+        "category": "HARASSMENT",
+        "severity": "HIGH"
+    },
+    {
+        "text": "Go map",
+        "category": "HARASSMENT",
+        "severity": "HIGH"
+    },
+    {
+        "text": "Nobody loves you.",
+        "category": "HARASSMENT",
+        "severity": "MEDIUM"
+    },
+    {
+        "text": "You are a waste of space.",
+        "category": "HARASSMENT",
+        "severity": "MEDIUM"
+    },
+    {
+        "text": "Shut up you idiot.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Ur trash kid.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Delete your account.",
+        "category": "HARASSMENT",
+        "severity": "MEDIUM"
+    },
+    {
+        "text": "KYS",
+        "category": "HARASSMENT",
+        "severity": "HIGH"
+    },
+    {
+        "text": "I know where you live.",
+        "category": "THREAT",
+        "severity": "CRITICAL"
+    },
+    {
+        "text": "I'm going to SWAT you.",
+        "category": "THREAT",
+        "severity": "CRITICAL"
+    },
+    {
+        "text": "You deserve to be raped.",
+        "category": "HATE_SPEECH",
+        "severity": "CRITICAL"
+    },
+    {
+        "text": "Go back to your country.",
+        "category": "HATE_SPEECH",
+        "severity": "HIGH"
+    },
+    {
+        "text": "Retard.",
+        "category": "HATE_SPEECH",
+        "severity": "HIGH"
+    },
+    {
+        "text": "Faggot.",
+        "category": "HATE_SPEECH",
+        "severity": "HIGH"
+    },
+    {
+        "text": "Nigger.",
+        "category": "HATE_SPEECH",
+        "severity": "CRITICAL"
+    },
+    {
+        "text": "Tranny.",
+        "category": "HATE_SPEECH",
+        "severity": "HIGH"
+    },
+    {
+        "text": "I will kill your family.",
+        "category": "THREAT",
+        "severity": "CRITICAL"
+    },
+    {
+        "text": "Die in a fire.",
+        "category": "HARASSMENT",
+        "severity": "HIGH"
+    },
+    {
+        "text": "You are pathetic.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Eat shit and die.",
+        "category": "HARASSMENT",
+        "severity": "HIGH"
+    },
+    {
+        "text": "Drink bleach.",
+        "category": "HARASSMENT",
+        "severity": "HIGH"
+    },
+    {
+        "text": "You're a mistake.",
+        "category": "HARASSMENT",
+        "severity": "MEDIUM"
+    },
+    {
+        "text": "I'm going to dox you.",
+        "category": "THREAT",
+        "severity": "HIGH"
+    },
+    {
+        "text": "Watch your back.",
+        "category": "THREAT",
+        "severity": "MEDIUM"
+    },
+    {
+        "text": "Scum of the earth.",
+        "category": "TOXIC",
+        "severity": "MEDIUM"
+    },
+    {
+        "text": "I hate you so much.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "You are mental.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Your stream sucks.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Unsubscribing, you suck.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Uninstall the game.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Get a life.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Cry more.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Cope harder.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Nobody asked.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Who asked?",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "L + Ratio",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Skill issue.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Dog water.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Bot.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "NPC behavior.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Touch grass.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Fatherless behavior.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Maidenless.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Cringe.",
+        "category": "TOXIC",
+        "severity": "LOW"
+    },
+    {
+        "text": "Based?",
+        "category": "TOXIC",
+        "severity": "LOW"
+    }
+]

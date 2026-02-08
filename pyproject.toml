@@ -3,7 +3,6 @@ name = "safety-system"
 version = "0.1.0"
 description = "Event Ingestion and Safety System"
 readme = "README.md"
-# Your requested Python constraint
 requires-python = ">=3.12, <3.13"
 dependencies = [
     "fastapi==0.104.1",
@@ -17,7 +16,7 @@ dependencies = [
     "sqlalchemy==2.0.23",
     "psycopg2-binary==2.9.11",
     "alembic==1.12.1",
-    "sentence-transformers==2.2.2",
+    "sentence-transformers>=2.3.0",
     "torch>=2.2.0",
     "faiss-cpu>=1.8.0",
     "numpy==1.26.2",
@@ -53,7 +52,6 @@ dev = [
 ]
 
 [tool.uv]
-# Resolves the 'certifi' / index conflict issues
 index-strategy = "unsafe-best-match"
 
 [[tool.uv.index]]

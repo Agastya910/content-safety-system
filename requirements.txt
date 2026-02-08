@@ -18,7 +18,7 @@ psycopg2-binary==2.9.11
 alembic==1.12.1
 
 # --- ML & Embeddings ---
-sentence-transformers==2.2.2
+sentence-transformers>=2.3.0
 torch>=2.2.0  # Supports Python 3.12
 faiss-cpu>=1.8.0
 numpy==1.26.2

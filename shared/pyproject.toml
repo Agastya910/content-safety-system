@@ -1,0 +1,15 @@
+[project]
+name = "safety-system-shared"
+version = "0.1.0"
+description = "Shared models and utilities for Safety System"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.5.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["safety_system"]

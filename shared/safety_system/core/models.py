@@ -155,6 +155,9 @@ class ContextData(BaseModel):
     event_id: str
     embedding: List[float]
     similar_events: List[SimilarEvent] = Field(default_factory=list)
+    actor_context: List[SimilarEvent] = Field(default_factory=list)
+    campaign_context: List[SimilarEvent] = Field(default_factory=list)
+    victim_context: List[SimilarEvent] = Field(default_factory=list)
     session_temporal_features: TemporalFeatures = Field(default_factory=TemporalFeatures)
 
 

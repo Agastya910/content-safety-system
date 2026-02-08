@@ -17,6 +17,7 @@ Performance Targets:
 
 import asyncio
 import logging
+import os
 import time
 import json
 import numpy as np
@@ -38,6 +39,9 @@ import numpy as np
 import opentelemetry.trace as trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.redis import RedisInstrumentor
+from qdrant_client import QdrantClient
+from qdrant_client.http import models as qmodels
+from pathlib import Path
 
 # Shared library
 from safety_system.core.models import (
@@ -64,12 +68,12 @@ class Settings:
         self.workers = int(os.getenv("WORKERS", "4"))
 
         # Redis
-        self.redis_host = os.getenv("REDIS_HOST", "redis")
+        self.redis_host = os.getenv("REDIS_HOST", "localhost")
         self.redis_port = int(os.getenv("REDIS_PORT", "6379"))
-        self.redis_password = os.getenv("REDIS_PASSWORD", "")
+        self.redis_password = os.getenv("REDIS_PASSWORD", "redis_dev_password")
 
         # Screening
-        self.screening_model = os.getenv("SCREENING_MODEL", "e5-small-v2")
+        self.screening_model = os.getenv("SCREENING_MODEL", "all-MiniLM-L6-v2")
         self.screening_threshold = float(os.getenv("SCREENING_THRESHOLD", "0.7"))
         self.embedding_cache_ttl = int(os.getenv("EMBEDDING_CACHE_TTL", "604800"))  # 7 days
 
@@ -77,6 +81,12 @@ class Settings:
         self.model_batch_size = int(os.getenv("MODEL_BATCH_SIZE", "32"))
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.use_fp32 = os.getenv("USE_FP32", "false").lower() == "true"
+
+        # Qdrant
+        self.qdrant_host = os.getenv("QDRANT_HOST", "localhost")
+        self.qdrant_port = int(os.getenv("QDRANT_PORT", "6333"))
+        self.qdrant_api_key = os.getenv("QDRANT_API_KEY", "")
+        self.collection_name = "abuse_patterns"
 
         # Redis Streams
         self.input_stream = "events:raw"
@@ -94,48 +104,45 @@ class Settings:
 settings = Settings()
 
 
-# ============ Embedding Model ============
+# ============ Embedding Model (Ollama) ============
 
 class EmbeddingModel:
     """
-    Manages sentence embedding model (e5-small-v2).
+    Manages embeddings using Ollama's nomic-embed-text model.
 
-    e5-small-v2 is optimized for:
-    - Small model size (33M params)
-    - Fast inference (< 20ms per text)
-    - Good quality embeddings (384-dim)
+    Benefits of Ollama:
+    - Unified API for embeddings and LLM
+    - No complex dependency management
+    - Works with local and cloud models
+    - 768-dim embeddings from nomic-embed-text
     """
 
     def __init__(self):
-        logger.info(f"Loading embedding model: {settings.screening_model}")
-        self.model = SentenceTransformer(
-            settings.screening_model,
-            device=settings.device
-        )
-
-        # Reduce model to FP32 if configured (faster but less accurate)
-        if not settings.use_fp32:
-            self.model.max_seq_length = 256  # Truncate long sequences
-
-        self.embedding_dim = self.model.get_sentence_embedding_dimension()
-        logger.info(f"Embedding model loaded (dim={self.embedding_dim}, device={settings.device})")
+        self.model_name = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+        self.ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        self.embedding_dim = 768  # nomic-embed-text dimension
+        logger.info(f"Using Ollama embeddings: {self.model_name} at {self.ollama_host}")
 
     async def embed(self, texts: List[str]) -> np.ndarray:
         """
-        Embed batch of texts.
+        Embed batch of texts using Ollama.
 
         Returns:
             Numpy array of shape (len(texts), embedding_dim)
         """
-        # Run in thread pool to avoid blocking event loop
-        loop = asyncio.get_event_loop()
-        embeddings = await loop.run_in_executor(
-            None,
-            self.model.encode,
-            texts,
-            False,  # convert_to_numpy=True
-            True    # normalize_embeddings=True
-        )
+        import httpx
+
+        embeddings = []
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            for text in texts:
+                response = await client.post(
+                    f"{self.ollama_host}/api/embeddings",
+                    json={"model": self.model_name, "prompt": text}
+                )
+                response.raise_for_status()
+                data = response.json()
+                embeddings.append(data["embedding"])
+
         return np.array(embeddings, dtype=np.float32)
 
 
@@ -214,60 +221,137 @@ class BehavioralHeuristics:
         return min(score, 1.0), flags
 
 
-# ============ FAISS Vector Store ============
+# ============ Qdrant Vector Store ============
 
-class FAISSVectorStore:
+class QdrantVectorStore:
     """
-    In-memory vector index for similarity search.
-
-    Used for finding similar past harassment patterns.
-    In production, this would be backed by Qdrant for persistence.
+    Qdrant-backed vector store for persistence and similarity search.
     """
 
-    def __init__(self, embedding_dim: int = 384):
-        # Use Flat (exact search) for accuracy
-        # In production with millions of vectors, use IVF-PQ or HNSW
-        self.index = faiss.IndexFlatL2(embedding_dim)
-        self.embeddings: Dict[int, np.ndarray] = {}
-        self.event_ids: Dict[int, str] = {}
-        self.id_counter = 0
-        self.lock = asyncio.Lock()
+    def __init__(self, embedding_dim: int = 768):
+        self.client = QdrantClient(
+            host=settings.qdrant_host,
+            port=settings.qdrant_port,
+            api_key=settings.qdrant_api_key if settings.qdrant_api_key else None
+        )
+        self.embedding_dim = embedding_dim
+        self.ensure_collection()
+        self.load_seed_data_if_empty()
 
-    async def add(self, event_id: str, embedding: np.ndarray):
-        """Add embedding to index"""
-        async with self.lock:
-            # Ensure proper shape
-            if len(embedding.shape) == 1:
-                embedding = embedding.reshape(1, -1)
+    def ensure_collection(self):
+        """Create collection if it doesn't exist"""
+        try:
+            self.client.get_collection(settings.collection_name)
+            logger.info(f"Connected to collection: {settings.collection_name}")
+        except Exception:
+            logger.info(f"Creating collection: {settings.collection_name}")
+            self.client.create_collection(
+                collection_name=settings.collection_name,
+                vectors_config=qmodels.VectorParams(
+                    size=self.embedding_dim,
+                    distance=qmodels.Distance.COSINE
+                )
+            )
 
-            # Add to FAISS
-            self.index.add(np.asarray(embedding, dtype=np.float32))
-            self.embeddings[self.id_counter] = embedding
-            self.event_ids[self.id_counter] = event_id
-            self.id_counter += 1
+    def load_seed_data_if_empty(self):
+        """Load seed corpus if collection is empty"""
+        try:
+            count = self.client.count(settings.collection_name).count
+            if count == 0:
+                logger.info("Collection empty. Loading seed data...")
+                seed_path = Path(__file__).parent / "data" / "abusive_patterns.json"
 
-    async def search(self, embedding: np.ndarray, k: int = 5) -> List[str]:
+                if not seed_path.exists():
+                    logger.warning(f"Seed file not found at {seed_path}")
+                    return
+
+                with open(seed_path, "r") as f:
+                    patterns = json.load(f)
+
+                if not patterns:
+                    return
+
+                # Generate embeddings for seed data
+                # Note: We need the embedding model here.
+                # Ideally, this should be async or done at startup differently.
+                # For now, we'll assume this runs fast or use a separate loading mechanism.
+                # However, since we are inside __init__ (sync), we can't await.
+                # We will defer this to an async init method or handle it in lifespan.
+                pass
+
+        except Exception as e:
+            logger.error(f"Failed to check/load seed data: {e}")
+
+    async def seed(self, embedding_model: EmbeddingModel):
+        """Async seeder called from lifespan"""
+        try:
+            count = self.client.count(settings.collection_name).count
+            if count > 0:
+                return
+
+            seed_path = Path(__file__).parent / "data" / "abusive_patterns.json"
+            if not seed_path.exists():
+                return
+
+            logger.info(f"Seeding from {seed_path}...")
+            with open(seed_path, "r") as f:
+                patterns = json.load(f)
+
+            if not patterns:
+                return
+
+            texts = [p["text"] for p in patterns]
+            embeddings = await embedding_model.embed(texts)
+
+            points = []
+            for i, (text, emb) in enumerate(zip(texts, embeddings)):
+                points.append(qmodels.PointStruct(
+                    id=i,  # Simple integer IDs for seed data
+                    vector=emb.tolist(),
+                    payload={
+                        "text": text,
+                        "type": "seed_abuse_pattern",
+                        "category": patterns[i].get("category", "HARASSMENT"),
+                        "severity": patterns[i].get("severity", "MEDIUM")
+                    }
+                ))
+
+            self.client.upsert(
+                collection_name=settings.collection_name,
+                points=points
+            )
+            logger.info(f"Seeding complete: {len(points)} patterns loaded.")
+
+        except Exception as e:
+            logger.error(f"Seeding failed: {e}")
+
+    async def search(self, embedding: np.ndarray, k: int = 5) -> List[Dict[str, Any]]:
         """
         Search for k most similar embeddings.
-
-        Returns:
-            List of event_ids
+        Returns list of matched payloads with scores.
         """
-        if len(embedding.shape) == 1:
-            embedding = embedding.reshape(1, -1)
+        try:
+            # Qdrant expects list[float]
+            vector = embedding.tolist()
 
-        distances, indices = self.index.search(
-            np.asarray(embedding, dtype=np.float32),
-            min(k, self.index.ntotal)
-        )
+            results = self.client.search(
+                collection_name=settings.collection_name,
+                query_vector=vector,
+                limit=k
+            )
 
-        # Return event IDs of nearest neighbors
-        results = []
-        for idx in indices[0]:
-            if idx >= 0 and idx in self.event_ids:
-                results.append(self.event_ids[idx])
+            matches = []
+            for hit in results:
+                matches.append({
+                    "text": hit.payload.get("text", ""),
+                    "score": hit.score,
+                    "category": hit.payload.get("category", "UNKNOWN")
+                })
+            return matches
 
-        return results
+        except Exception as e:
+            logger.error(f"Vector search failed: {e}")
+            return []
 
 
 # ============ Risk Screener ============
@@ -280,7 +364,7 @@ class RiskScreener:
     - Batch processing
     """
 
-    def __init__(self, embedding_model: EmbeddingModel, vector_store: FAISSVectorStore, redis: Redis):
+    def __init__(self, embedding_model: EmbeddingModel, vector_store: QdrantVectorStore, redis: Redis):
         self.embedding_model = embedding_model
         self.vector_store = vector_store
         self.redis = redis
@@ -311,6 +395,9 @@ class RiskScreener:
                 if use_cache:
                     cached_embedding = await self.redis.get(f"embedding:{event.event_id}")
                     if cached_embedding:
+                        # Redis returns bytes, decode to str for fromhex
+                        if isinstance(cached_embedding, bytes):
+                            cached_embedding = cached_embedding.decode('utf-8')
                         embedding = np.frombuffer(
                             bytes.fromhex(cached_embedding),
                             dtype=np.float32
@@ -328,7 +415,7 @@ class RiskScreener:
                         await self.redis.set(
                             f"embedding:{event.event_id}",
                             embedding_hex,
-                            expire=settings.embedding_cache_ttl
+                            ex=settings.embedding_cache_ttl
                         )
 
                     span.set_attribute("cache_hit", False)
@@ -336,11 +423,22 @@ class RiskScreener:
                 # 3. Behavioral heuristics score
                 heuristic_score, heuristic_flags = BehavioralHeuristics.score(event.content)
 
-                # 4. Embedding-based scoring (future: could use reference embeddings)
-                embedding_score = 0.0  # Placeholder
+                # 4. Semantic Similarity Score
+                similar_events = await self.vector_store.search(embedding, k=3)
 
-                # 5. Combine scores (weighted)
-                combined_score = 0.6 * heuristic_score + 0.4 * embedding_score
+                similarity_score = 0.0
+                if similar_events:
+                    # Top match score (Cosine similarity is -1 to 1, but Qdrant usually returns 0-1 for normalized)
+                    # We map it to a risk probability
+                    top_score = similar_events[0]['score']
+                    # Heuristic mapping: 0.8+ similarity -> High risk
+                    similarity_score = max(0.0, top_score)
+
+                # 5. Hybrid Scoring Formula
+                # combined_score = 0.4 * heuristic_score + 0.6 * similarity_score
+                # This ensures meaningful contribution from both signals.
+                combined_score = (0.4 * heuristic_score) + (0.6 * similarity_score)
+                combined_score = min(combined_score, 1.0) # Cap at 1.0
 
                 # 6. Classify risk
                 if combined_score > 0.85:
@@ -352,8 +450,7 @@ class RiskScreener:
                 else:
                     risk_category = RiskCategory.LOW_RISK
 
-                # 7. Search similar events (async)
-                similar_events = await self.vector_store.search(embedding, k=3)
+                # 7. Calculate latency
 
                 # Calculate latency
                 screening_time_ms = (time.perf_counter() - start_time) * 1000
@@ -363,11 +460,11 @@ class RiskScreener:
                     event_id=event.event_id,
                     risk_score=combined_score,
                     risk_category=risk_category,
-                    confidence=max(heuristic_score, embedding_score),
+                    confidence=max(heuristic_score, similarity_score),
                     flags=[str(f) for f in heuristic_flags],
                     details={
                         "heuristic_score": float(heuristic_score),
-                        "embedding_score": float(embedding_score),
+                        "embedding_score": float(similarity_score),
                         "similar_events": similar_events
                     },
                     screening_time_ms=int(screening_time_ms)
@@ -535,7 +632,7 @@ class StreamConsumer:
 
 redis_client: Optional[Redis] = None
 embedding_model: Optional[EmbeddingModel] = None
-vector_store: Optional[FAISSVectorStore] = None
+vector_store: Optional[QdrantVectorStore] = None
 risk_screener: Optional[RiskScreener] = None
 stream_consumer: Optional[StreamConsumer] = None
 
@@ -557,7 +654,11 @@ async def lifespan(app: FastAPI):
     )
 
     embedding_model = EmbeddingModel()
-    vector_store = FAISSVectorStore(embedding_model.embedding_dim)
+    vector_store = QdrantVectorStore(embedding_model.embedding_dim)
+
+    # Run seeder
+    await vector_store.seed(embedding_model)
+
     risk_screener = RiskScreener(embedding_model, vector_store, redis_client)
     stream_consumer = StreamConsumer(redis_client, risk_screener)
 
@@ -568,8 +669,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info(f"Shutting down {settings.service_name}")
     await stream_consumer.stop()
-    redis_client.close()
-    await redis_client.wait_closed()
+    await redis_client.aclose()
 
 
 app = FastAPI(
